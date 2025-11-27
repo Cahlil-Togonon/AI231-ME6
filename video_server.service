@@ -1,0 +1,12 @@
+[Unit]
+Description=USB Camera Video Server (FastAPI)
+After=network.target
+
+[Service]
+User=acetogonon
+WorkingDirectory=/home/acetogonon/Documents/ACETogonon
+ExecStart=/usr/bin/python3 -m uvicorn video:app --host 0.0.0.0 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=Chromium Kiosk
+After=graphical.target video_ui.service
+
+[Service]
+User=acetogonon
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/acetogonon/.Xauthority
+ExecStart=/usr/bin/chromium-browser \
+    --noerrdialogs \
+    --disable-infobars \
+    --kiosk http://0.0.0.0:8000
+# Restart=always
+
+[Install]
+WantedBy=graphical.target
