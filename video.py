@@ -95,6 +95,17 @@ def is_open_hand(landmarks):
 
     return open_fingers >= 4   # All 4 fingers extended
 
+def is_closed_fist(landmarks):
+    # finger tips indices
+    tips = [4, 8, 12, 16, 20]
+
+    closed_fingers = 0
+    for tip in tips[1:]:   # ignore thumb for now
+        if landmarks[tip].y > landmarks[tip - 2].y:  # fingertip below knuckle
+            closed_fingers += 1
+
+    return closed_fingers >= 4   # All 4 fingers closed
+
 # ============================================================
 #   BASIC CAMERA STREAM (NO INFERENCE)
 # ============================================================
@@ -149,12 +160,18 @@ def generate_inference_frames():
             if not running:
                 results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 if results.multi_hand_landmarks:
+                    for hand_landmarks in results.multi_hand_landmarks:
+                        mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
                     lm = results.multi_hand_landmarks[0].landmark
                     if is_open_hand(lm):
                         print("🖐️ Open hand detected → Starting inference...")
                         running = True
 
-            if running:
+                ok, buffer = cv2.imencode(".jpg", frame)
+                if not ok:
+                    continue
+
+            else:
                 results = model(frame, verbose=False)
                 annotated = results[0].plot()
 
@@ -174,11 +191,6 @@ def generate_inference_frames():
                             running = False   # stop after high confidence detection
 
                 ok, buffer = cv2.imencode(".jpg", annotated)
-                if not ok:
-                    continue
-            else:
-                # show normal frame if not running
-                ok, buffer = cv2.imencode(".jpg", frame)
                 if not ok:
                     continue
 
