@@ -1,6 +1,6 @@
 import cv2
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from ultralytics import YOLO
 
@@ -12,8 +12,12 @@ import threading
 from queue import Queue
 import pyttsx3
 
+import os
+
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+INDEX_FILE = os.path.join(BASE_DIR, "index.html")
 
 speech_queue = Queue()
 
@@ -120,7 +124,6 @@ GESTURE_running = True
 # -------------------------------
 # Mediapipe Hands for gesture recognition
 # -------------------------------
-
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1)
 mp_draw = mp.solutions.drawing_utils
@@ -248,6 +251,48 @@ def generate_inference_frames():
                             speak("Stopping inference")
 
 
+            # -----------------------------
+            # DRAW STATUS HEADER
+            # -----------------------------
+            status_text = []
+
+            if OD_running:
+                status_text.append("Object Detection: ACTIVE")
+            else:
+                status_text.append("Object Detection: STOPPED")
+
+            if GESTURE_running:
+                status_text.append("Gesture Recognition: ACTIVE")
+            else:
+                status_text.append("Gesture Recognition: PAUSED")
+
+            header_text = "  |  ".join(status_text)
+
+            # background bar
+            header_height = 40
+            overlay = frame.copy()
+
+            cv2.rectangle(
+                overlay,
+                (0, 0),
+                (frame.shape[1], header_height),
+                (0, 0, 0),
+                -1
+            )
+
+            frame = cv2.addWeighted(overlay, 0.6, frame, 0.4, 0)
+
+            cv2.putText(
+                frame,
+                header_text,
+                (10, 21),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+
             ok, buffer = cv2.imencode(".jpg", frame)
             if not ok:
                 continue
@@ -265,89 +310,9 @@ def generate_inference_frames():
 # ============================================================
 #   ROUTES
 # ============================================================
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 def index():
-    html = """
-    <!doctype html>
-    <html>
-
-    <head>
-      <meta charset="utf-8" />
-      <meta name="viewport" content="width=device-width,initial-scale=1" />
-      <title>Camera POS</title>
-      <style>
-        body { display:flex; margin:0; padding:0; height:100vh; background:black; color:white; }
-        #cam { flex: 0 0 60%; object-fit: cover; width: 100%; height: 100%; }
-        #pos { flex: 0 0 40%; padding: 10px; overflow: auto; background: #111; }
-        table { width:100%; border-collapse: collapse; }
-        th, td { border:1px solid #555; padding:5px; text-align:left; }
-        button { padding:10px 20px; font-size:16px; margin-bottom:10px; }
-      </style>
-    </head>
-
-    <body>
-      <div>
-        <img id="cam" src="/inference" alt="Camera stream">
-      </div>
-      <div id="pos">
-        <button onclick="startInference()">Start</button>
-        <h2>Items:</h2>
-        <table id="pos_table">
-          <tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>
-        </table>
-        <h3>Grand Total: ₱<span id="grand_total">0</span></h3>
-      </div>
-
-      <audio id="beep_sound" src="/static/beep.mp3"></audio>
-
-      <script>
-        let beep_unlocked = false;
-
-        function startInference() {
-          fetch('/start');
-        }
-
-        // Unlock beep sound on first user interaction
-        if (!beep_unlocked) {
-        const beep = document.getElementById('beep_sound');
-        beep.play().catch(() => {});  // play once to unlock
-        beep.pause();
-        beep.currentTime = 0;
-        beep_unlocked = true;
-        }
-
-        async function updatePOS() {
-          const response = await fetch('/pos_items');
-          const data = await response.json();
-          const table = document.getElementById('pos_table');
-
-          // Clear table except header
-          table.innerHTML = '<tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>';
-
-          // Add items
-          for (const item of data.items) {
-            const row = table.insertRow();
-            row.insertCell(0).textContent = item.qty;
-            row.insertCell(1).textContent = item.name;
-            row.insertCell(2).textContent = item.unit_price;
-            row.insertCell(3).textContent = item.total_price;
-          }
-
-          // Update grand total
-          document.getElementById('grand_total').textContent = data.grand_total;
-          
-            // Play beep if new item detected
-          if (data.new_item && beep_unlocked) {
-            document.getElementById('beep_sound').play();
-          }
-        }
-
-        setInterval(updatePOS, 500);
-      </script>
-    </body>
-    </html>
-    """
-    return html
+    return FileResponse(INDEX_FILE)
 
 @app.get("/pos_items")
 def get_pos_items():
