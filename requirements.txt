@@ -1,0 +1,11 @@
+# torch
+# torchaudio
+# torchvision
+ultralytics
+mediapipe
+fastapi
+uvicorn
+pyttsx3
+onnx
+onnxruntime-gpu
+torch-tensorrt
