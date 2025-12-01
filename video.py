@@ -6,10 +6,43 @@ from ultralytics import YOLO
 
 import mediapipe as mp
 import cv2
+import time
+
+import threading
+from queue import Queue
+import pyttsx3
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+speech_queue = Queue()
+
+def tts_worker():
+    engine = pyttsx3.init('sapi5')   # force Windows engine
+    engine.setProperty('rate', 175)
+    engine.setProperty('volume', 1.0)
+
+    while True:
+        text = speech_queue.get()
+
+        try:
+            print("🗣 SPEAK:", text)
+            engine.say(text)
+            engine.runAndWait()
+
+        except Exception as e:
+            print("❌ TTS error:", e)
+
+        speech_queue.task_done()
+
+# Start exactly once
+threading.Thread(target=tts_worker, daemon=True).start()
+
+def speak(text):
+    if not text:
+        return
+
+    speech_queue.put_nowait(str(text))
 # -------------------------------
 # Load YOLO model (TensorRT / ONNX / PT / TorchScript)
 # -------------------------------
@@ -75,6 +108,14 @@ ITEMS = {
 pos_items = {}
 running = False
 last_count = 0
+
+last_OD_time = 0
+last_gesture_time = 0
+COOLDOWN_PERIOD = 2.0  # seconds
+GESTURE_RESTART = 6.0  # seconds
+OD_running = False
+GESTURE_running = True
+
 
 # -------------------------------
 # Mediapipe Hands for gesture recognition
@@ -142,7 +183,7 @@ def generate_frames():
 #   INFERENCE STREAM (YOLO)
 # ============================================================
 def generate_inference_frames():
-    global running, pos_items
+    global running, pos_items, last_OD_time, last_gesture_time, OD_running, GESTURE_running, COOLDOWN_PERIOD, GESTURE_RESTART
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -157,42 +198,59 @@ def generate_inference_frames():
             if not ok:
                 continue
 
-            if not running:
+            now = time.time()
+
+            if OD_running:
+                results = model(frame, verbose=False)
+                annotated = results[0].plot()
+                frame = annotated
+
+                if last_OD_time and now - last_OD_time > GESTURE_RESTART:
+                    GESTURE_running = True
+
+                if now - last_OD_time >= COOLDOWN_PERIOD:
+
+                    for box in results[0].boxes:
+                        cls = int(box.cls[0])
+                        conf = float(box.conf[0])
+                        if conf >= 0.8:
+                            item = ITEMS.get(cls)
+                            if item:
+                                name = item["name"]
+                                price = item["price"]
+                                if name in pos_items:
+                                    pos_items[name]["qty"] += 1
+                                else:
+                                    pos_items[name] = {"qty": 1, "unit_price": price}
+
+                                last_OD_time = now
+                                print(f"✅ Detected: {name}")
+                                speak(f"{name}")
+            
+            if GESTURE_running:
                 results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 if results.multi_hand_landmarks:
                     for hand_landmarks in results.multi_hand_landmarks:
                         mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
                     lm = results.multi_hand_landmarks[0].landmark
-                    if is_open_hand(lm):
-                        print("🖐️ Open hand detected → Starting inference...")
-                        running = True
 
-                ok, buffer = cv2.imencode(".jpg", frame)
-                if not ok:
-                    continue
+                    if now - last_gesture_time >= 1.0: # gesture cooldown in seconds
+                        last_gesture_time = now
+                        if is_open_hand(lm):
+                            print("🖐️ Open hand detected → Starting inference...")
+                            OD_running = True
+                            GESTURE_running = False
+                            last_OD_time = now
+                            speak("Starting inference")
+                        elif is_closed_fist(lm):
+                            print("✊ Closed fist detected → Stopping inference...")
+                            OD_running = False
+                            speak("Stopping inference")
 
-            else:
-                results = model(frame, verbose=False)
-                annotated = results[0].plot()
 
-                # Add detected items with conf >= 0.9
-                for box in results[0].boxes:
-                    cls = int(box.cls[0])
-                    conf = float(box.conf[0])
-                    if conf >= 0.85:
-                        item = ITEMS.get(cls)
-                        if item:
-                            name = item["name"]
-                            price = item["price"]
-                            if name in pos_items:
-                                pos_items[name]["qty"] += 1
-                            else:
-                                pos_items[name] = {"qty": 1, "unit_price": price}
-                            running = False   # stop after high confidence detection
-
-                ok, buffer = cv2.imencode(".jpg", annotated)
-                if not ok:
-                    continue
+            ok, buffer = cv2.imencode(".jpg", frame)
+            if not ok:
+                continue
 
             yield (
                 b"--frame\r\n"
