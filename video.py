@@ -22,7 +22,7 @@ INDEX_FILE = os.path.join(BASE_DIR, "index.html")
 speech_queue = Queue()
 
 def tts_worker():
-    engine = pyttsx3.init('sapi5')   # force Windows engine
+    engine = pyttsx3.init()
     engine.setProperty('rate', 175)
     engine.setProperty('volume', 1.0)
 
@@ -210,6 +210,7 @@ def generate_inference_frames():
 
                 if last_OD_time and now - last_OD_time > GESTURE_RESTART:
                     GESTURE_running = True
+                    OD_running = False
 
                 if now - last_OD_time >= COOLDOWN_PERIOD:
 
