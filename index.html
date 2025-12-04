@@ -6,10 +6,10 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Camera POS</title>
     <style>
-        body { display:flex; margin:0; padding:0; height:100vh; background:black; color:white; }
-        #video-container { flex: 0 0 60%; display: flex; justify-content: center; align-items: center; background: black;}
+        body { display:flex; margin:0; padding:0; height:100vh; background:white; color:black; }
+        #video-container { flex: 0 0 50%; display: flex; justify-content: center; align-items: center; background: white;}
         #cam { width: min(100%, 90vh); height: auto; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 8px; border: 2px solid #333; }
-        #pos { flex: 0 0 40%; padding: 10px; overflow: auto; background: #111; }
+        #pos { flex: 0 0 50%; padding: 10px; overflow: auto; background: white; }
         table { width:100%; border-collapse: collapse; }
         th, td { border:1px solid #555; padding:5px; text-align:left; }
         button { padding:10px 20px; font-size:16px; margin-bottom:10px; }
@@ -20,13 +20,13 @@
         <div id="video-container">
             <img id="cam" src="/inference" alt="Camera stream">
         </div>
-        <div id="pos">
-            <button onclick="startInference()">Start</button>
-            <h2>Items:</h2>
-            <table id="pos_table">
-                <tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>
+        <div id="pos" style="font-size: 1.3em;">
+            <button onclick="startInference()" style="font-size:1.3em;">Start</button>
+            <h2 style="font-size:1.5em;">Items:</h2>
+            <table id="pos_table" style="font-size:1.2em;">
+            <tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>
             </table>
-            <h3>Grand Total: ₱<span id="grand_total">0</span></h3>
+            <h3 style="font-size:1.8em;">Grand Total: ₱<span id="grand_total">0</span></h3>
         </div>
 
         <audio id="beep_sound" src="/static/beep.mp3"></audio>
@@ -41,19 +41,19 @@
             }
 
             if (!beep_unlocked) {
-            const beep = document.getElementById('beep_sound');
-            const open = document.getElementById('open_sound');
-            const close = document.getElementById('close_sound');
-            beep.play().catch(() => {});
-            beep.pause();
-            beep.currentTime = 0;
-            open.play().catch(() => {});
-            open.pause();
-            open.currentTime = 0;
-            close.play().catch(() => {});
-            close.pause();
-            close.currentTime = 0;
-            beep_unlocked = true;
+                const beep = document.getElementById('beep_sound');
+                const open = document.getElementById('open_sound');
+                const close = document.getElementById('close_sound');
+                beep.play().catch(() => {});
+                beep.pause();
+                beep.currentTime = 0;
+                open.play().catch(() => {});
+                open.pause();
+                open.currentTime = 0;
+                close.play().catch(() => {});
+                close.pause();
+                close.currentTime = 0;
+                beep_unlocked = true;
             }
 
             async function pollGestureEvent() {
