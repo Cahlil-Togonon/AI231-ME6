@@ -1,79 +1,79 @@
 <!doctype html>
 <html>
 
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Camera POS</title>
-<style>
-body { display:flex; margin:0; padding:0; height:100vh; background:black; color:white; }
-#video-container { flex: 0 0 60%; display: flex; justify-content: center; align-items: center; background: black;}
-#cam { width: min(100%, 90vh); height: auto; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 8px; border: 2px solid #333; }
-#pos { flex: 0 0 40%; padding: 10px; overflow: auto; background: #111; }
-table { width:100%; border-collapse: collapse; }
-th, td { border:1px solid #555; padding:5px; text-align:left; }
-button { padding:10px 20px; font-size:16px; margin-bottom:10px; }
-</style>
-</head>
+    <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Camera POS</title>
+    <style>
+        body { display:flex; margin:0; padding:0; height:100vh; background:black; color:white; }
+        #video-container { flex: 0 0 60%; display: flex; justify-content: center; align-items: center; background: black;}
+        #cam { width: min(100%, 90vh); height: auto; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 8px; border: 2px solid #333; }
+        #pos { flex: 0 0 40%; padding: 10px; overflow: auto; background: #111; }
+        table { width:100%; border-collapse: collapse; }
+        th, td { border:1px solid #555; padding:5px; text-align:left; }
+        button { padding:10px 20px; font-size:16px; margin-bottom:10px; }
+    </style>
+    </head>
 
-<body>
-<div id="video-container">
-  <img id="cam" src="/inference" alt="Camera stream">
-</div>
-<div id="pos">
-<button onclick="startInference()">Start</button>
-<h2>Items:</h2>
-<table id="pos_table">
-    <tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>
-</table>
-<h3>Grand Total: ₱<span id="grand_total">0</span></h3>
-</div>
+    <body>
+        <div id="video-container">
+            <img id="cam" src="/inference" alt="Camera stream">
+        </div>
+        <div id="pos">
+            <button onclick="startInference()">Start</button>
+            <h2>Items:</h2>
+            <table id="pos_table">
+                <tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>
+            </table>
+            <h3>Grand Total: ₱<span id="grand_total">0</span></h3>
+        </div>
 
-<audio id="beep_sound" src="/static/beep.mp3"></audio>
+        <audio id="beep_sound" src="/static/beep.mp3"></audio>
 
-<script>
-let beep_unlocked = false;
+        <script>
+            let beep_unlocked = false;
 
-function startInference() {
-    fetch('/start');
-}
+            function startInference() {
+                fetch('/start');
+            }
 
-// Unlock beep sound on first user interaction
-if (!beep_unlocked) {
-const beep = document.getElementById('beep_sound');
-beep.play().catch(() => {});  // play once to unlock
-beep.pause();
-beep.currentTime = 0;
-beep_unlocked = true;
-}
+            // Unlock beep sound on first user interaction
+            if (!beep_unlocked) {
+            const beep = document.getElementById('beep_sound');
+            beep.play().catch(() => {});  // play once to unlock
+            beep.pause();
+            beep.currentTime = 0;
+            beep_unlocked = true;
+            }
 
-async function updatePOS() {
-    const response = await fetch('/pos_items');
-    const data = await response.json();
-    const table = document.getElementById('pos_table');
+            async function updatePOS() {
+                const response = await fetch('/pos_items');
+                const data = await response.json();
+                const table = document.getElementById('pos_table');
 
-    // Clear table except header
-    table.innerHTML = '<tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>';
+                // Clear table except header
+                table.innerHTML = '<tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>';
 
-    // Add items
-    for (const item of data.items) {
-    const row = table.insertRow();
-    row.insertCell(0).textContent = item.qty;
-    row.insertCell(1).textContent = item.name;
-    row.insertCell(2).textContent = item.unit_price;
-    row.insertCell(3).textContent = item.total_price;
-    }
+                // Add items
+                for (const item of data.items) {
+                const row = table.insertRow();
+                row.insertCell(0).textContent = item.qty;
+                row.insertCell(1).textContent = item.name;
+                row.insertCell(2).textContent = item.unit_price;
+                row.insertCell(3).textContent = item.total_price;
+                }
 
-    // Update grand total
-    document.getElementById('grand_total').textContent = data.grand_total;
-    
-    // Play beep if new item detected
-    if (data.new_item && beep_unlocked) {
-    document.getElementById('beep_sound').play();
-    }
-}
+                // Update grand total
+                document.getElementById('grand_total').textContent = data.grand_total;
+                
+                // Play beep if new item detected
+                if (data.new_item && beep_unlocked) {
+                document.getElementById('beep_sound').play();
+                }
+            }
 
-setInterval(updatePOS, 500);
-</script>
-</body>
+            setInterval(updatePOS, 500);
+        </script>
+    </body>
 </html>
