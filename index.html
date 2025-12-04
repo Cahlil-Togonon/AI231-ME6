@@ -30,6 +30,8 @@
         </div>
 
         <audio id="beep_sound" src="/static/beep.mp3"></audio>
+        <audio id="open_sound" src="/static/discord_join.mp3"></audio>
+        <audio id="close_sound" src="/static/discord_leave.mp3"></audio>
 
         <script>
             let beep_unlocked = false;
@@ -38,13 +40,36 @@
                 fetch('/start');
             }
 
-            // Unlock beep sound on first user interaction
             if (!beep_unlocked) {
             const beep = document.getElementById('beep_sound');
-            beep.play().catch(() => {});  // play once to unlock
+            const open = document.getElementById('open_sound');
+            const close = document.getElementById('close_sound');
+            beep.play().catch(() => {});
             beep.pause();
             beep.currentTime = 0;
+            open.play().catch(() => {});
+            open.pause();
+            open.currentTime = 0;
+            close.play().catch(() => {});
+            close.pause();
+            close.currentTime = 0;
             beep_unlocked = true;
+            }
+
+            async function pollGestureEvent() {
+                const res = await fetch('/gesture_event');
+                const data = await res.json();
+
+                if (data.event == "open") {
+                    const open_sound = document.getElementById('open_sound');
+                    open_sound.currentTime = 0;
+                    open_sound.play();
+                }
+                else if (data.event == "close") {
+                    const close_sound = document.getElementById('close_sound');
+                    close_sound.currentTime = 0;
+                    close_sound.play();
+                }
             }
 
             async function updatePOS() {
@@ -74,6 +99,7 @@
             }
 
             setInterval(updatePOS, 500);
+            setInterval(pollGestureEvent, 500);
         </script>
     </body>
 </html>

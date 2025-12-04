@@ -19,6 +19,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_FILE = os.path.join(BASE_DIR, "index.html")
 
+# -------------------------------
+# TTS Setup
+# -------------------------------
+
 speech_queue = Queue()
 
 def tts_worker():
@@ -120,12 +124,13 @@ GESTURE_RESTART = 6.0  # seconds
 OD_running = False
 GESTURE_running = True
 
+last_gesture_event = True
 
 # -------------------------------
 # Mediapipe Hands for gesture recognition
 # -------------------------------
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1)
+hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, model_complexity=0, min_detection_confidence=0.5, min_tracking_confidence=0.5)
 mp_draw = mp.solutions.drawing_utils
 
 def is_open_hand(landmarks):
@@ -245,11 +250,9 @@ def generate_inference_frames():
                             OD_running = True
                             GESTURE_running = False
                             last_OD_time = now
-                            speak("Starting inference")
                         elif is_closed_fist(lm):
                             print("✊ Closed fist detected → Stopping inference...")
                             OD_running = False
-                            speak("Stopping inference")
 
 
             # -----------------------------
@@ -351,6 +354,16 @@ def video_feed():
         generate_frames(),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
+
+@app.get("/gesture_event")
+def get_gesture_event():
+    global GESTURE_running, last_gesture_event
+    if last_gesture_event != GESTURE_running:
+        last_gesture_event = GESTURE_running
+        event = "open" if GESTURE_running else "close"
+    else: 
+        event = None
+    return JSONResponse({"event": event})
 
 @app.get("/inference")
 def inference_feed():
