@@ -5,12 +5,10 @@ from fastapi.staticfiles import StaticFiles
 from ultralytics import YOLO
 
 import mediapipe as mp
-import cv2
 import time
 import torch.cuda
 
 import threading
-from queue import Queue
 import pyttsx3
 import numpy as np
 
@@ -25,41 +23,32 @@ INDEX_FILE = os.path.join(BASE_DIR, "index.html")
 # TTS Setup
 # -------------------------------
 
-speech_queue = Queue()
+def speak(text: str):
 
-def tts_worker():
-    engine = pyttsx3.init()
-    engine.setProperty('rate', 175)
-    engine.setProperty('volume', 1.0)
-
-    while True:
-        text = speech_queue.get()
-
+    def _speak():
         try:
-            print("🗣 SPEAK:", text)
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 175)
+            engine.setProperty('volume', 1.0)
+            voices = engine.getProperty('voices')
+            engine.setProperty('voice', voices[1].id)
+
+            print("🔊 TTS speaking:", text)
             engine.say(text)
             engine.runAndWait()
 
         except Exception as e:
             print("❌ TTS error:", e)
 
-        speech_queue.task_done()
-
-# Start exactly once
-threading.Thread(target=tts_worker, daemon=True).start()
-
-def speak(text):
-    if not text:
-        return
-
-    speech_queue.put_nowait(str(text))
+    # Start exactly once
+    threading.Thread(target=_speak, daemon=True).start()
 
 # -------------------------------
 # Load YOLO model (TensorRT / ONNX / PT / TorchScript)
 # -------------------------------
 model_name = 'yolov8n'
 dataset_name = 'AI231_dataset'
-format = 'tensorrt'
+format = 'onnx'
 
 format_extension = {
     'pytorch': 'pt',
@@ -68,11 +57,9 @@ format_extension = {
     'torchscript': 'torchscript'
 }
 
-# model = YOLO(f"../AI231/AI231_dataset/runs/{model_name}-{dataset_name}-augmented/weights/best.{format_extension[format]}")
-
 device = 0 if torch.cuda.is_available() else 'cpu'
 
-model = YOLO(f"./models/best_jetson.{format_extension[format]}")
+model = YOLO(f"./models/best.{format_extension[format]}")
 print(f"Loaded {model_name} model in {format} format")
 
 
@@ -93,7 +80,7 @@ ITEMS = {
     5:  {"name": "Century-Tuna", "price": 35},
     6:  {"name": "VCut-Spicy-Barbeque", "price": 30},
     7:  {"name": "Selecta-Cornetto", "price": 25},
-    8:  {"name": "nestleyogurt", "price": 75},
+    8:  {"name": "Nestle-Yogurt", "price": 75},
     9:  {"name": "Femme-Bathroom-Tissue", "price": 130},
     10: {"name": "maya-champorado", "price": 25},
     11: {"name": "jnj-potato-chips", "price": 30},
@@ -110,12 +97,12 @@ ITEMS = {
     22: {"name": "Summit-Drinking-Water", "price": 15},
     23: {"name": "almond_milk", "price": 85},
     24: {"name": "Piknik", "price": 30},
-    25: {"name": "Rambutan", "price": 15},
+    25: {"name": "Bactidol", "price": 15},
     26: {"name": "head&shoulders_shampoo", "price": 110},
     27: {"name": "irish-spring-soap", "price": 130},
     28: {"name": "c2_na_green", "price": 35},
     29: {"name": "colgate_toothpaste", "price": 150},
-    30: {"name": "555-sardines-tomato", "price": 35},
+    30: {"name": "555-sardines", "price": 35},
     31: {"name": "meadows_truffle_chips", "price": 40},
     32: {"name": "double-black", "price": 400},
     33: {"name": "NongshimCupNoodles", "price": 35},
@@ -167,23 +154,6 @@ def is_closed_fist(landmarks):
     return closed_fingers >= 4   # All 4 fingers closed
 
 # ============================================================
-# Center Crop
-# ============================================================
-
-def center_crop_square(frame, size=640):
-    h, w, _ = frame.shape
-    min_edge = min(h, w)
-
-    # Center crop
-    y1 = (h - min_edge) // 2
-    x1 = (w - min_edge) // 2
-
-    crop = frame[y1:y1+min_edge, x1:x1+min_edge]
-    crop = cv2.resize(crop, (size, size), interpolation=cv2.INTER_LINEAR)
-
-    return crop
-
-# ============================================================
 #   BASIC CAMERA STREAM (NO INFERENCE)
 # ============================================================
 def generate_frames():
@@ -223,8 +193,8 @@ def generate_inference_frames():
 
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FPS, 60)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 760)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 640)
 
     if not cap.isOpened():
         print("❌ Could not open camera")
@@ -244,8 +214,6 @@ def generate_inference_frames():
             if not ok:
                 continue
 
-            frame = center_crop_square(frame, size=640)
-
             now = time.time()
 
             if OD_running:
@@ -259,7 +227,7 @@ def generate_inference_frames():
                     GESTURE_running = True
                     OD_running = False
 
-                if now - last_OD_time >= COOLDOWN_PERIOD:
+                elif now - last_OD_time >= COOLDOWN_PERIOD:
 
                     for box in results[0].boxes:
                         cls = int(box.cls[0])
@@ -278,7 +246,7 @@ def generate_inference_frames():
                                 print(f"✅ Detected: {name}")
                                 speak(f"{name}")
             
-            if GESTURE_running:
+            elif GESTURE_running:
                 results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 if results.multi_hand_landmarks:
                     for hand_landmarks in results.multi_hand_landmarks:
@@ -294,10 +262,14 @@ def generate_inference_frames():
                             last_OD_time = now
                             current_gesture = "Open Hand"
 
+                            speak("Starting Transaction")
+
                         elif is_closed_fist(lm):
                             print("✊ Closed fist detected → Stopping inference...")
                             OD_running = False
                             current_gesture = "Closed Fist"
+
+                            speak("Ending Transaction")
 
                         else:
                             current_gesture = "None"
@@ -306,39 +278,25 @@ def generate_inference_frames():
             # -----------------------------
             # DRAW STATUS HEADER
             # -----------------------------
-            status_text = []
+            status_text = ""
+            color = (0,0,0)
 
-            OD_status = "ACTIVE" if OD_running else "STOPPED"
-            GESTURE_status = "ACTIVE" if GESTURE_running else "PAUSED"  
-
-            status_text.append(f"Object Detection: {OD_status}")
-            status_text.append(f"Gesture Recognition: {GESTURE_status}")    
-
-            header_text = "  |  ".join(status_text)
-
-            # background bar
-            header_height = 40
-            overlay = frame.copy()
-
-            # Draw semi-transparent rectangle
-            cv2.rectangle(
-                overlay,
-                (0, 0),
-                (frame.shape[1], header_height),
-                (0, 0, 0),
-                -1
-            )
-
-            frame = cv2.addWeighted(overlay, 0.6, frame, 0.4, 0)
+            if OD_running:
+                status_text = "YOLO Model: ACTIVE"
+                color = (0, 255, 0)
+            else:
+                status_text = f"Hand Gesture: {current_gesture}"
+                # orange color
+                color = (0, 165, 255)
 
             # Draw header text
             cv2.putText(
                 frame,
-                header_text,
+                status_text,
                 (90, 21),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 255),
+                0.7,
+                color,
                 2,
                 cv2.LINE_AA,
             )
@@ -355,23 +313,11 @@ def generate_inference_frames():
                 fps_time = now_fps
                 model_fps = 1.0 / model_inference_time if model_inference_time > 0 else 0
 
-            # Draw Camera FPS
-            cv2.putText(
-                frame,
-                f"Model FPS: {model_fps:.1f}",
-                (470, 610),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 0),
-                2,
-                cv2.LINE_AA
-            )
-
             # Draw Model FPS
             cv2.putText(
                 frame,
-                f"Camera FPS: {current_fps:.1f}",
-                (470, 630),
+                f"Model FPS: {model_fps:.1f}",
+                (frame.shape[1] - 250, frame.shape[0] - 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (0, 255, 0),
@@ -379,19 +325,20 @@ def generate_inference_frames():
                 cv2.LINE_AA
             )
 
-            # Draw Hand Gesture Action
+            # Draw Camera FPS
             cv2.putText(
                 frame,
-                f"Hand Gesture: {current_gesture}",
-                (10, 630),
+                f"Camera FPS: {current_fps:.1f}",
+                (frame.shape[1] - 250, frame.shape[0] - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
-                (255, 255, 0),
+                (0, 255, 0),
                 2,
                 cv2.LINE_AA
             )
 
-            ok, buffer = cv2.imencode(".jpg", frame)
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100]
+            ok, buffer = cv2.imencode(".jpg", frame, encode_param)
             if not ok:
                 continue
 
