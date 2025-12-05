@@ -59,7 +59,7 @@ def speak(text):
 # -------------------------------
 model_name = 'yolov8n'
 dataset_name = 'AI231_dataset'
-format = 'onnx'
+format = 'tensorrt'
 
 format_extension = {
     'pytorch': 'pt',
@@ -72,7 +72,7 @@ format_extension = {
 
 device = 0 if torch.cuda.is_available() else 'cpu'
 
-model = YOLO(f"./models/best.{format_extension[format]}")
+model = YOLO(f"./models/best_jetson.{format_extension[format]}")
 print(f"Loaded {model_name} model in {format} format")
 
 
