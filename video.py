@@ -14,20 +14,71 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_FILE = os.path.join(BASE_DIR, "index.html")
 
 with open('./classes.json', 'r') as f:
-    ITEMS = json.load(f)
+    CLASS_ITEMS = json.load(f)
 
-### global variables
-pos_items = {}
-running = False
-last_count = 0
+class MainApplication:
+    def __init__(self, class_items):
+        self.class_items = class_items
+        self.pos_items = {}
+        self.last_count = 0
+        self.total_qty = 0
+        self.grand_total = 0.0
+        self.state = 'pre-transaction'  # other states: 'in-transaction', 'post-transaction', 'checkout'
+        self.ready = False
 
-last_OD_time = 0
-last_gesture_time = 0
-COOLDOWN_PERIOD = 2.0  # seconds
-GESTURE_RESTART = 6.0  # seconds
-OD_running = False
-GESTURE_running = True
-last_gesture_event = True   
+        global AUDIO_HANDLER
+        AUDIO_HANDLER = AudioManager()
+
+        model_startup = threading.Thread(target=self.initialize_models, daemon=True)
+        model_startup.start()
+
+        return
+    
+    def initialize_models(self):
+        global YOLO_MODEL, GESTURE_MODEL
+
+        YOLO_MODEL = YOLO_Model(model_name='yolov8n', format='onnx')
+        GESTURE_MODEL = Gesture_Model()
+
+        self.ready = True
+        return
+    
+    def get_app_state(self):
+        return self.state
+    
+    def set_app_state(self, new_state: str):
+        self.state = new_state
+        return
+
+    def add_item(self, cls: int):
+        item = self.class_items.get(str(cls), None)
+        name = None
+        if item:
+            name = item["name"]
+            price = item["price"]
+            if name in self.pos_items:
+                self.pos_items[name]["qty"] += 1
+                self.pos_items[name]["total_price"] += price
+            else:
+                self.pos_items[name] = {"qty": 1, "unit_price": price, "total_price": price}
+        
+        self.total_qty += 1
+        self.grand_total += price
+
+        return name
+
+    def new_item_added(self):
+        return self.total_qty > self.last_count
+
+    def clear_items(self):
+        self.pos_items.clear()
+        self.last_count = 0
+        self.total_qty = 0
+        self.grand_total = 0.0
+        self.state = 'pre-transaction'
+
+        AUDIO_HANDLER.speak("Restarted. Welcome!")
+        return
 
 class AudioManager:
     def __init__(self):
@@ -91,6 +142,11 @@ class YOLO_Model:
         print(f"Loaded {model_name} model in {format} format")
 
         self.warmup()
+
+        self.last_OD_time = 0
+        self.GESTURE_RESTART = 6.0  # seconds
+        self.COOLDOWN_PERIOD = 2.0  # seconds
+
         return
 
     def warmup(self):
@@ -104,6 +160,33 @@ class YOLO_Model:
         self.model(dummy, device=self.device, verbose=False)
         print("✅ YOLO warm-up complete")
 
+    def inference(self, frame, time_now, MAIN_APP: MainApplication, AUDIO_HANDLER: AudioManager):
+        results = self.model(frame, device=self.device, verbose=False)
+        model_inference_time = time.time() - time_now
+
+        annotated = results[0].plot()
+        frame = annotated
+
+        if MAIN_APP.pos_items and time_now - self.last_OD_time >= self.GESTURE_RESTART:
+            MAIN_APP.set_app_state('post-transaction')
+            AUDIO_HANDLER.speak("Show a closed fist to end the transaction")
+            return frame, model_inference_time
+
+        elif time_now - self.last_OD_time >= self.COOLDOWN_PERIOD:
+
+            for box in results[0].boxes:
+                cls = int(box.cls[0])
+                conf = float(box.conf[0])
+                if conf >= 0.8:
+                    name = MAIN_APP.add_item(cls)
+                    if name:
+                        self.last_OD_time = time_now
+
+                        print(f"✅ Detected: {name}")
+                        AUDIO_HANDLER.speak(f"{name}")
+            
+        return frame, model_inference_time
+
 class Gesture_Model:
     def __init__(self):
         try:
@@ -114,7 +197,64 @@ class Gesture_Model:
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(static_image_mode=False, max_num_hands=1, model_complexity=0, min_detection_confidence=0.5, min_tracking_confidence=0.5)
         self.mp_draw = mp.solutions.drawing_utils
+        self.current_gesture = "None"
+        self.closed_fist_start_time = None
+        self.open_hand_start_time = None
+        self.GESTURE_HOLD_DURATION = 1.5  # seconds
         return
+
+    def check_gesture_hold(self, gesture: str, target_gesture: str, start_time_attr: str) -> bool:
+        """Check if a gesture has been held for the required duration."""
+        if gesture == target_gesture:
+            start_time = getattr(self, start_time_attr)
+            if start_time is None:
+                setattr(self, start_time_attr, time.time())
+            else:
+                elapsed = time.time() - start_time
+                if elapsed >= self.GESTURE_HOLD_DURATION:
+                    setattr(self, start_time_attr, None)
+                    return True
+        else:
+            setattr(self, start_time_attr, None)
+        return False
+
+    def inference(self, frame, MAIN_APP: MainApplication, AUDIO_HANDLER: AudioManager):
+        results = self.hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        current_gesture = "None"
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                self.mp_draw.draw_landmarks(frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+            lm = results.multi_hand_landmarks[0].landmark
+
+            if self.is_open_hand(lm):
+                print("🖐️ Open hand detected")
+                current_gesture = "Open Hand"
+            elif self.is_closed_fist(lm):
+                print("✊ Closed fist detected")
+                current_gesture = "Closed Fist"
+            else:
+                current_gesture = "None"
+
+
+            if MAIN_APP.get_app_state() == 'pre-transaction':
+                if self.check_gesture_hold(current_gesture, "Open Hand", "open_hand_start_time"):
+                    MAIN_APP.set_app_state('in-transaction')
+                    AUDIO_HANDLER.speak("Starting Transaction.")
+                    
+            elif MAIN_APP.get_app_state() == 'post-transaction':
+                if self.check_gesture_hold(current_gesture, "Open Hand", "open_hand_start_time"):
+                    MAIN_APP.set_app_state('in-transaction')
+                    AUDIO_HANDLER.speak("Resuming Transaction.")
+                    YOLO_MODEL.last_OD_time = time.time()           ## kinda bad, but works
+
+                elif self.check_gesture_hold(current_gesture, "Closed Fist", "closed_fist_start_time"):
+                    MAIN_APP.set_app_state('checkout')
+                    AUDIO_HANDLER.speak("Checkout initiated.")
+            
+            else:
+                raise ValueError("Invalid app state for gesture inference")
+
+        return frame, current_gesture
 
     def is_open_hand(self, landmarks):
         # finger tips indices
@@ -149,6 +289,8 @@ class Camera:
     def __del__(self):
         self.cap.release()
 
+MAIN_APP = MainApplication(CLASS_ITEMS)
+
 ### Basic Camera Stream
 def generate_frames():
     
@@ -180,7 +322,7 @@ def generate_frames():
 
 ### Camera Stream with Inference
 def generate_inference_frames():
-    global running, pos_items, last_OD_time, last_gesture_time, OD_running, GESTURE_running, COOLDOWN_PERIOD, GESTURE_RESTART, device
+    global MAIN_APP
 
     CAMERA = Camera()
     cap = CAMERA.cap
@@ -188,10 +330,13 @@ def generate_inference_frames():
     if not cap.isOpened():
         print("❌ Could not open camera")
         return
+    
+    AUDIO_HANDLER.speak("Welcome! Please Wait.")
 
-    YOLO_MODEL = YOLO_Model(model_name='yolov8n', format='onnx')
-    GESTURE_MODEL = Gesture_Model()
-    AUDIO_HANDLER = AudioManager()
+    while not MAIN_APP.ready:
+        time.sleep(0.1)
+
+    AUDIO_HANDLER.speak("System Ready.")
 
     fps_time = time.time()
     fps_counter = 0
@@ -206,77 +351,34 @@ def generate_inference_frames():
             if not ok:
                 continue
 
-            now = time.time()
+            time_now = time.time()
 
-            if OD_running:
-                results = YOLO_MODEL.model(frame, device=YOLO_MODEL.device, verbose=False)
-                model_inference_time = time.time() - now
-                
-                annotated = results[0].plot()
-                frame = annotated
-
-                if last_OD_time and now - last_OD_time > GESTURE_RESTART:
-                    GESTURE_running = True
-                    OD_running = False
-
-                elif now - last_OD_time >= COOLDOWN_PERIOD:
-
-                    for box in results[0].boxes:
-                        cls = int(box.cls[0])
-                        conf = float(box.conf[0])
-                        if conf >= 0.8:
-                            item = ITEMS.get(str(cls), None)
-                            if item:
-                                name = item["name"]
-                                price = item["price"]
-                                if name in pos_items:
-                                    pos_items[name]["qty"] += 1
-                                else:
-                                    pos_items[name] = {"qty": 1, "unit_price": price}
-
-                                last_OD_time = now
-                                print(f"✅ Detected: {name}")
-                                AUDIO_HANDLER.speak(f"{name}")
-            
-            elif GESTURE_running:
-                results = GESTURE_MODEL.hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                if results.multi_hand_landmarks:
-                    for hand_landmarks in results.multi_hand_landmarks:
-                        GESTURE_MODEL.mp_draw.draw_landmarks(frame, hand_landmarks, GESTURE_MODEL.mp_hands.HAND_CONNECTIONS)
-                    lm = results.multi_hand_landmarks[0].landmark
-
-                    if now - last_gesture_time >= 2.0: # gesture cooldown in seconds
-                        last_gesture_time = now
-                        if GESTURE_MODEL.is_open_hand(lm):
-                            print("🖐️ Open hand detected → Starting inference...")
-                            OD_running = True
-                            GESTURE_running = False
-                            last_OD_time = now
-                            current_gesture = "Open Hand"
-
-                            AUDIO_HANDLER.speak("Starting Transaction")
-
-                        elif GESTURE_MODEL.is_closed_fist(lm):
-                            print("✊ Closed fist detected → Stopping inference...")
-                            OD_running = False
-                            current_gesture = "Closed Fist"
-
-                            AUDIO_HANDLER.speak("Ending Transaction")
-
-                else:
-                    current_gesture = "None"
-
+            app_state = MAIN_APP.get_app_state()
 
             status_text = ""
             color = (0,0,0)
 
-            if OD_running:
-                status_text = "YOLO Model: ACTIVE"
-                color = (0, 255, 0)
-            else:
+            if app_state == 'pre-transaction':
+                frame, current_gesture = GESTURE_MODEL.inference(frame, MAIN_APP, AUDIO_HANDLER)
                 status_text = f"Hand Gesture: {current_gesture}"
-                # orange color
-                color = (0, 165, 255)
+                color = (0, 165, 255) # orange color
+
+            elif app_state == 'in-transaction':
+                frame, model_inference_time = YOLO_MODEL.inference(frame, time_now, MAIN_APP, AUDIO_HANDLER)
+                status_text = "YOLO Model: ACTIVE"
+                color = (0, 255, 0) # green color
+
+            elif app_state == 'post-transaction':
+                frame, current_gesture = GESTURE_MODEL.inference(frame, MAIN_APP, AUDIO_HANDLER)
+                status_text = f"Hand Gesture: {current_gesture}"
+                color = (0, 165, 255) # orange color
+
+            elif MAIN_APP.get_app_state() == 'checkout':
+                status_text = "Checkout, please proceed to payment."
+                color = (255, 0, 0) # blue color    
+
+            else:
+                raise ValueError("Invalid app state")
 
             # Draw header text
             cv2.putText(frame,
@@ -290,13 +392,13 @@ def generate_inference_frames():
             )
 
             fps_counter += 1
-            elapsed = now - fps_time
+            elapsed = time_now - fps_time
 
             # Update FPS every 0.5 second
             if elapsed >= 0.5:
                 current_fps = fps_counter / elapsed
                 fps_counter = 0
-                fps_time = now
+                fps_time = time_now
                 model_fps = 1.0 / model_inference_time if model_inference_time > 0 else 0
 
             # Draw Model FPS
@@ -305,7 +407,7 @@ def generate_inference_frames():
                 f"Model FPS: {model_fps:.1f}",
                 (frame.shape[1] - 250, frame.shape[0] - 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
+                0.4,
                 (0, 255, 0),
                 2,
                 cv2.LINE_AA
@@ -317,7 +419,7 @@ def generate_inference_frames():
                 f"Camera FPS: {current_fps:.1f}",
                 (frame.shape[1] - 250, frame.shape[0] - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
+                0.4,
                 (0, 255, 0),
                 2,
                 cv2.LINE_AA
@@ -345,35 +447,28 @@ def generate_inference_frames():
 def index():
     return FileResponse(INDEX_FILE)
 
+@app.post("/app_state")
+def get_app_state():
+    global MAIN_APP
+    return JSONResponse({"state": MAIN_APP.get_app_state()})
+
 @app.get("/pos_items")
 def get_pos_items():
-    # Calculate total per item and grand total
-    global pos_items, last_count
-    items_list = []
-    grand_total = 0
-    total_qty = 0
-    for name, data in pos_items.items():
-        total_price = data["qty"] * data["unit_price"]
-        grand_total += total_price
-        total_qty += data["qty"]
-        items_list.append({
-            "qty": data["qty"],
-            "name": name,
-            "unit_price": data["unit_price"],
-            "total_price": total_price
-        })
+    global MAIN_APP
 
-    new_item_detected = total_qty > last_count
-    last_count = total_qty
+    new_item_detected = MAIN_APP.new_item_added()
+    if new_item_detected:
+        MAIN_APP.last_count = MAIN_APP.total_qty
 
-    return JSONResponse({"items": items_list, "grand_total": grand_total, "new_item": new_item_detected})
+    return JSONResponse({"items": MAIN_APP.pos_items, "grand_total": MAIN_APP.grand_total, "new_item": new_item_detected})
 
 # Start inference route
-@app.get("/start")
-def start_inference():
-    global running, pos_items, last_count
-    running = True
-    return {"status": "inference started"}
+@app.get("/restart")
+def restart_app():
+    global MAIN_APP
+    MAIN_APP.set_app_state('pre-transaction')
+    MAIN_APP.clear_items()
+    return {"status": "restarted"}
 
 @app.get("/video_feed")
 def video_feed():
@@ -381,16 +476,6 @@ def video_feed():
         generate_frames(),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
-
-@app.get("/gesture_event")
-def get_gesture_event():
-    global GESTURE_running, last_gesture_event
-    if last_gesture_event != GESTURE_running:
-        last_gesture_event = GESTURE_running
-        event = "close" if GESTURE_running else "open"
-    else: 
-        event = None
-    return JSONResponse({"event": event})
 
 @app.get("/inference")
 def inference_feed():
