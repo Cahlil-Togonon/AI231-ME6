@@ -2,115 +2,21 @@ import cv2
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from ultralytics import YOLO
 
-import mediapipe as mp
 import time
-import torch.cuda
-
 import threading
-import pyttsx3
-import numpy as np
-
 import os
+import json
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_FILE = os.path.join(BASE_DIR, "index.html")
 
-# -------------------------------
-# TTS Setup
-# -------------------------------
+with open('./classes.json', 'r') as f:
+    ITEMS = json.load(f)
 
-def speak(text: str):
-
-    def _speak():
-        try:
-            engine = pyttsx3.init()
-            engine.setProperty('rate', 175)
-            engine.setProperty('volume', 1.0)
-            voices = engine.getProperty('voices')
-            engine.setProperty('voice', voices[1].id)
-
-            print("🔊 TTS speaking:", text)
-            engine.say(text)
-            engine.runAndWait()
-
-        except Exception as e:
-            print("❌ TTS error:", e)
-
-    # Start exactly once
-    threading.Thread(target=_speak, daemon=True).start()
-
-# -------------------------------
-# Load YOLO model (TensorRT / ONNX / PT / TorchScript)
-# -------------------------------
-model_name = 'yolov8n'
-dataset_name = 'AI231_dataset'
-format = 'onnx'
-
-format_extension = {
-    'pytorch': 'pt',
-    'onnx': 'onnx',
-    'tensorrt': 'engine',
-    'torchscript': 'torchscript'
-}
-
-device = 0 if torch.cuda.is_available() else 'cpu'
-
-model = YOLO(f"./models/best.{format_extension[format]}")
-print(f"Loaded {model_name} model in {format} format")
-
-
-print("🔥 Warming up YOLO engine...")
-dummy = np.zeros((640,640,3), dtype=np.uint8)
-model(dummy, device=device, verbose=False)
-print("✅ YOLO warm-up complete")
-
-# -------------------------------
-# POS Item List
-# -------------------------------
-ITEMS = {
-    0:  {"name": "coffee_nescafe", "price": 5},
-    1:  {"name": "coffee_kopiko", "price": 5},
-    2:  {"name": "lucky-me-pancit-canton", "price": 10},
-    3:  {"name": "Coke-in-can", "price": 50},
-    4:  {"name": "alaska_milk", "price": 120},
-    5:  {"name": "Century-Tuna", "price": 35},
-    6:  {"name": "VCut-Spicy-Barbeque", "price": 30},
-    7:  {"name": "Selecta-Cornetto", "price": 25},
-    8:  {"name": "Nestle-Yogurt", "price": 75},
-    9:  {"name": "Femme-Bathroom-Tissue", "price": 130},
-    10: {"name": "maya-champorado", "price": 25},
-    11: {"name": "jnj-potato-chips", "price": 30},
-    12: {"name": "Nivea-Deodorant", "price": 150},
-    13: {"name": "UFC-Canned-Mushroom", "price": 45},
-    14: {"name": "Libbys-Vienna-Sausage-can", "price": 40},
-    15: {"name": "Stik-O", "price": 60},
-    16: {"name": "nissin_cup_noodles", "price": 35},
-    17: {"name": "dewberry-strawberry", "price": 60},
-    18: {"name": "Smart-C", "price": 40},
-    19: {"name": "pineapple-juice-can", "price": 35},
-    20: {"name": "nestle_chuckie", "price": 50},
-    21: {"name": "Delight-Probiotic-Drink", "price": 45},
-    22: {"name": "Summit-Drinking-Water", "price": 15},
-    23: {"name": "almond_milk", "price": 85},
-    24: {"name": "Piknik", "price": 30},
-    25: {"name": "Bactidol", "price": 15},
-    26: {"name": "head&shoulders_shampoo", "price": 110},
-    27: {"name": "irish-spring-soap", "price": 130},
-    28: {"name": "c2_na_green", "price": 35},
-    29: {"name": "colgate_toothpaste", "price": 150},
-    30: {"name": "555-sardines", "price": 35},
-    31: {"name": "meadows_truffle_chips", "price": 40},
-    32: {"name": "double-black", "price": 400},
-    33: {"name": "NongshimCupNoodles", "price": 35},
-}
-
-# -------------------------------
-# Global state for POS and inference status
-# -------------------------------
+### global variables
 pos_items = {}
 running = False
 last_count = 0
@@ -121,45 +27,133 @@ COOLDOWN_PERIOD = 2.0  # seconds
 GESTURE_RESTART = 6.0  # seconds
 OD_running = False
 GESTURE_running = True
+last_gesture_event = True   
 
-last_gesture_event = True
+class AudioManager:
+    def __init__(self):
+        try:
+            from queue import Queue
+        except ImportError:
+            raise ImportError("pyttsx3 package is not installed. Please install it to use TTS features.")
+        
+        self.speech_queue = Queue()
 
-# -------------------------------
-# Mediapipe Hands for gesture recognition
-# -------------------------------
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, model_complexity=0, min_detection_confidence=0.5, min_tracking_confidence=0.5)
-mp_draw = mp.solutions.drawing_utils
+        self.worker_thread = threading.Thread(target=self.tts_worker, daemon=True)
+        self.worker_thread.start()
+        return
 
-def is_open_hand(landmarks):
-    # finger tips indices
-    tips = [4, 8, 12, 16, 20]
+    def tts_worker(self):
+        try:
+            import pyttsx3
+        except ImportError:
+            raise ImportError("pyttsx3 package is not installed. Please install it to use TTS features.")
 
-    open_fingers = 0
-    for tip in tips[1:]:   # ignore thumb for now
-        if landmarks[tip].y < landmarks[tip - 2].y:  # fingertip above knuckle
-            open_fingers += 1
+        while True:
+            text = self.speech_queue.get()
+            try:
+                print("🗣 SPEAK:", text)
+                engine = pyttsx3.init()
+                engine.setProperty('rate', 175)
+                engine.setProperty('volume', 1.0)
+                voices = engine.getProperty('voices')
+                engine.setProperty('voice', voices[1].id)
+                engine.say(text)
+                engine.runAndWait()
+                del engine
 
-    return open_fingers >= 4   # All 4 fingers extended
+            except Exception as e:
+                print("❌ TTS error:", e)
+            self.speech_queue.task_done()
 
-def is_closed_fist(landmarks):
-    # finger tips indices
-    tips = [4, 8, 12, 16, 20]
+    def speak(self, text):
+        if not text:
+            return
+        self.speech_queue.put(str(text))
 
-    closed_fingers = 0
-    for tip in tips[1:]:   # ignore thumb for now
-        if landmarks[tip].y > landmarks[tip - 2].y:  # fingertip below knuckle
-            closed_fingers += 1
+class YOLO_Model:
+    def __init__(self, model_name: str = 'yolov8n', format: str = 'onnx'):
+        try:
+            from ultralytics import YOLO
+            import torch.cuda
+        except ImportError:
+            raise ImportError("ultralytics/torch package is not installed. Please install it to use YOLO features.")
 
-    return closed_fingers >= 4   # All 4 fingers closed
+        format_extension = {
+            'pytorch': 'pt',
+            'onnx': 'onnx',
+            'tensorrt': 'engine',
+            'torchscript': 'torchscript'
+        }
 
-# ============================================================
-#   BASIC CAMERA STREAM (NO INFERENCE)
-# ============================================================
+        self.device = 0 if torch.cuda.is_available() else 'cpu'
+
+        self.model = YOLO(f"./models/best.{format_extension[format]}")
+        print(f"Loaded {model_name} model in {format} format")
+
+        self.warmup()
+        return
+
+    def warmup(self):
+        try:
+            import numpy as np
+        except ImportError:
+            raise ImportError("numpy package is not installed. Please install it to use YOLO features.")
+
+        print("🔥 Warming up YOLO engine...")
+        dummy = np.zeros((640,640,3), dtype=np.uint8)
+        self.model(dummy, device=self.device, verbose=False)
+        print("✅ YOLO warm-up complete")
+
+class Gesture_Model:
+    def __init__(self):
+        try:
+            import mediapipe as mp
+        except ImportError:
+            raise ImportError("mediapipe package is not installed. Please install it to use Gesture features.") 
+
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(static_image_mode=False, max_num_hands=1, model_complexity=0, min_detection_confidence=0.5, min_tracking_confidence=0.5)
+        self.mp_draw = mp.solutions.drawing_utils
+        return
+
+    def is_open_hand(self, landmarks):
+        # finger tips indices
+        tips = [4, 8, 12, 16, 20]
+
+        open_fingers = 0
+        for tip in tips[1:]:   # ignore thumb
+            if landmarks[tip].y < landmarks[tip - 2].y:  # fingertip above knuckle
+                open_fingers += 1
+
+        return open_fingers >= 4   # Open hand (all 4 fingers extended)
+
+    def is_closed_fist(self, landmarks):
+        # finger tips indices
+        tips = [4, 8, 12, 16, 20]
+
+        closed_fingers = 0
+        for tip in tips[1:]:    # ignore thumb
+            if landmarks[tip].y > landmarks[tip - 2].y:  # fingertip below knuckle
+                closed_fingers += 1
+
+        return closed_fingers >= 4   # Closed fist (all 4 fingers curled)
+
+class Camera:
+    def __init__(self):
+        self.cap = cv2.VideoCapture(0)
+        self.cap.set(cv2.CAP_PROP_FPS, 60)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 640)
+        return None
+
+    def __del__(self):
+        self.cap.release()
+
+### Basic Camera Stream
 def generate_frames():
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    
+    camera = Camera()
+    cap = camera.cap
 
     if not cap.isOpened():
         print("❌ Could not open camera")
@@ -184,28 +178,26 @@ def generate_frames():
     finally:
         cap.release()
 
-
-# ============================================================
-#   INFERENCE STREAM (YOLO)
-# ============================================================
+### Camera Stream with Inference
 def generate_inference_frames():
     global running, pos_items, last_OD_time, last_gesture_time, OD_running, GESTURE_running, COOLDOWN_PERIOD, GESTURE_RESTART, device
 
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FPS, 60)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 640)
+    CAMERA = Camera()
+    cap = CAMERA.cap
 
     if not cap.isOpened():
         print("❌ Could not open camera")
         return
+
+    YOLO_MODEL = YOLO_Model(model_name='yolov8n', format='onnx')
+    GESTURE_MODEL = Gesture_Model()
+    AUDIO_HANDLER = AudioManager()
 
     fps_time = time.time()
     fps_counter = 0
     current_fps = 0
     model_inference_time = 0
     model_fps = 0
-
     current_gesture = "None"
 
     try:
@@ -217,7 +209,7 @@ def generate_inference_frames():
             now = time.time()
 
             if OD_running:
-                results = model(frame, device=device, verbose=False)
+                results = YOLO_MODEL.model(frame, device=YOLO_MODEL.device, verbose=False)
                 model_inference_time = time.time() - now
                 
                 annotated = results[0].plot()
@@ -233,7 +225,7 @@ def generate_inference_frames():
                         cls = int(box.cls[0])
                         conf = float(box.conf[0])
                         if conf >= 0.8:
-                            item = ITEMS.get(cls)
+                            item = ITEMS.get(str(cls), None)
                             if item:
                                 name = item["name"]
                                 price = item["price"]
@@ -244,40 +236,37 @@ def generate_inference_frames():
 
                                 last_OD_time = now
                                 print(f"✅ Detected: {name}")
-                                speak(f"{name}")
+                                AUDIO_HANDLER.speak(f"{name}")
             
             elif GESTURE_running:
-                results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                results = GESTURE_MODEL.hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 if results.multi_hand_landmarks:
                     for hand_landmarks in results.multi_hand_landmarks:
-                        mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                        GESTURE_MODEL.mp_draw.draw_landmarks(frame, hand_landmarks, GESTURE_MODEL.mp_hands.HAND_CONNECTIONS)
                     lm = results.multi_hand_landmarks[0].landmark
 
-                    if now - last_gesture_time >= 1.0: # gesture cooldown in seconds
+                    if now - last_gesture_time >= 2.0: # gesture cooldown in seconds
                         last_gesture_time = now
-                        if is_open_hand(lm):
+                        if GESTURE_MODEL.is_open_hand(lm):
                             print("🖐️ Open hand detected → Starting inference...")
                             OD_running = True
                             GESTURE_running = False
                             last_OD_time = now
                             current_gesture = "Open Hand"
 
-                            speak("Starting Transaction")
+                            AUDIO_HANDLER.speak("Starting Transaction")
 
-                        elif is_closed_fist(lm):
+                        elif GESTURE_MODEL.is_closed_fist(lm):
                             print("✊ Closed fist detected → Stopping inference...")
                             OD_running = False
                             current_gesture = "Closed Fist"
 
-                            speak("Ending Transaction")
+                            AUDIO_HANDLER.speak("Ending Transaction")
 
-                        else:
-                            current_gesture = "None"
+                else:
+                    current_gesture = "None"
 
 
-            # -----------------------------
-            # DRAW STATUS HEADER
-            # -----------------------------
             status_text = ""
             color = (0,0,0)
 
@@ -290,8 +279,7 @@ def generate_inference_frames():
                 color = (0, 165, 255)
 
             # Draw header text
-            cv2.putText(
-                frame,
+            cv2.putText(frame,
                 status_text,
                 (90, 21),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -302,15 +290,13 @@ def generate_inference_frames():
             )
 
             fps_counter += 1
-            now_fps = time.time()
-            elapsed = now_fps - fps_time
-            update_speed = 0.5
+            elapsed = now - fps_time
 
-            # Update FPS every 1 second
-            if elapsed >= update_speed:
+            # Update FPS every 0.5 second
+            if elapsed >= 0.5:
                 current_fps = fps_counter / elapsed
                 fps_counter = 0
-                fps_time = now_fps
+                fps_time = now
                 model_fps = 1.0 / model_inference_time if model_inference_time > 0 else 0
 
             # Draw Model FPS
