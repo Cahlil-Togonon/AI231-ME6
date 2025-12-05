@@ -9,7 +9,7 @@
         body { display:flex; margin:0; padding:0; height:100vh; background:white; color:black; }
         #video-container { flex: 0 0 50%; display: flex; justify-content: center; align-items: center; background: white;}
         #cam { width: min(100%, 90vh); height: auto; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 8px; border: 2px solid #333; }
-        #pos { flex: 0 0 50%; padding: 10px; overflow: auto; background: white; }
+        #pos { flex: 0 0 48%; padding: 5px; overflow: auto; background: white; }
         table { width:100%; border-collapse: collapse; }
         th, td { border:1px solid #555; padding:5px; text-align:left; }
         button { padding:10px 20px; font-size:16px; margin-bottom:10px; }
@@ -20,56 +20,40 @@
         <div id="video-container">
             <img id="cam" src="/inference" alt="Camera stream">
         </div>
-        <div id="pos" style="font-size: 1.3em;">
-            <button onclick="startInference()" style="font-size:1.3em;">Start</button>
-            <h2 style="font-size:1.5em;">Items:</h2>
-            <table id="pos_table" style="font-size:1.2em;">
-            <tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>
-            </table>
-            <h3 style="font-size:1.8em;">Grand Total: ₱<span id="grand_total">0</span></h3>
+        <div id="pos" style="font-size: 1.3em; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2 style="font-size:1.5em;">🛒 Cart:</h2>
+            <button onclick="restartTransaction()" style="font-size:1.3em; background-color: red; color: white; border: none; cursor: pointer; border-radius: 4px;">Restart</button>
+            </div>
+            <table id="pos_table" style="font-size:1.2em; overflow: auto;"></table>
+            <!-- <tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>
+            </table> -->
+            <h3 style="font-size:1.8em; margin-top: auto;">Grand Total: ₱<span id="grand_total">0</span></h3>
         </div>
 
         <audio id="beep_sound" src="/static/beep.mp3"></audio>
-        <audio id="open_sound" src="/static/discord_join.mp3"></audio>
-        <audio id="close_sound" src="/static/discord_leave.mp3"></audio>
 
         <script>
             let beep_unlocked = false;
 
-            function startInference() {
-                fetch('/start');
+            function restartTransaction() {
+                fetch('/restart');
+                const table = document.getElementById('pos_table');
+                table.innerHTML = '<tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>';
+                document.getElementById('grand_total').textContent = '0';
+            }
+
+            // Restart transaction only on page refresh (not first load)
+            if (performance.navigation.type === 1) {
+                restartTransaction();
             }
 
             if (!beep_unlocked) {
                 const beep = document.getElementById('beep_sound');
-                const open = document.getElementById('open_sound');
-                const close = document.getElementById('close_sound');
                 beep.play().catch(() => {});
                 beep.pause();
                 beep.currentTime = 0;
-                open.play().catch(() => {});
-                open.pause();
-                open.currentTime = 0;
-                close.play().catch(() => {});
-                close.pause();
-                close.currentTime = 0;
                 beep_unlocked = true;
-            }
-
-            async function pollGestureEvent() {
-                const res = await fetch('/gesture_event');
-                const data = await res.json();
-
-                if (data.event == "open") {
-                    const open_sound = document.getElementById('open_sound');
-                    open_sound.currentTime = 0;
-                    open_sound.play();
-                }
-                else if (data.event == "close") {
-                    const close_sound = document.getElementById('close_sound');
-                    close_sound.currentTime = 0;
-                    close_sound.play();
-                }
             }
 
             async function updatePOS() {
@@ -80,13 +64,15 @@
                 // Clear table except header
                 table.innerHTML = '<tr><th>Qty</th><th>Name</th><th>Unit Price (₱)</th><th>Total Price (₱)</th></tr>';
 
-                // Add items
-                for (const item of data.items) {
-                const row = table.insertRow();
-                row.insertCell(0).textContent = item.qty;
-                row.insertCell(1).textContent = item.name;
-                row.insertCell(2).textContent = item.unit_price;
-                row.insertCell(3).textContent = item.total_price;
+                for (const key in data.items) {
+                    if (data.items.hasOwnProperty(key)) {
+                        const item = data.items[key];
+                        const row = table.insertRow();
+                        row.insertCell(0).textContent = item.qty;
+                        row.insertCell(1).textContent = key;
+                        row.insertCell(2).textContent = item.unit_price;
+                        row.insertCell(3).textContent = item.total_price;
+                    }
                 }
 
                 // Update grand total
@@ -94,12 +80,11 @@
                 
                 // Play beep if new item detected
                 if (data.new_item && beep_unlocked) {
-                document.getElementById('beep_sound').play();
+                    document.getElementById('beep_sound').play();
                 }
             }
 
             setInterval(updatePOS, 500);
-            setInterval(pollGestureEvent, 500);
         </script>
     </body>
 </html>
