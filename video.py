@@ -239,10 +239,10 @@ class Gesture_Model:
             lm = results.multi_hand_landmarks[0].landmark
 
             if self.is_open_hand(lm):
-                print("🖐️ Open hand detected")
+                # print("🖐️ Open hand detected")
                 current_gesture = "Open Hand"
             elif self.is_closed_fist(lm):
-                print("✊ Closed fist detected")
+                # print("✊ Closed fist detected")
                 current_gesture = "Closed Fist"
             else:
                 current_gesture = "None"
@@ -250,11 +250,13 @@ class Gesture_Model:
 
             if MAIN_APP.get_app_state() == 'pre-transaction':
                 if self.check_gesture_hold(current_gesture, "Open Hand", "open_hand_start_time"):
+                    print("🖐️ Open hand detected")
                     MAIN_APP.set_app_state('in-transaction')
                     AUDIO_HANDLER.speak("Starting Transaction.")
                     
             elif MAIN_APP.get_app_state() == 'post-transaction':
                 if self.check_gesture_hold(current_gesture, "Open Hand", "open_hand_start_time"):
+                    print("✊ Closed fist detected")
                     MAIN_APP.set_app_state('in-transaction')
                     AUDIO_HANDLER.speak("Resuming Transaction.")
                     YOLO_MODEL.last_OD_time = time.time()           ## kinda bad, but works
