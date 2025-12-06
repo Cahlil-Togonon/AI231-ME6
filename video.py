@@ -6,7 +6,6 @@ from fastapi.staticfiles import StaticFiles
 import time
 import threading
 import os
-import json
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
