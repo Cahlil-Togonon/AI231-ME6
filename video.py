@@ -25,22 +25,32 @@ class MainApplication:
         self.grand_total = 0.0
         self.state = 'pre-transaction'  # other states: 'in-transaction', 'post-transaction', 'checkout'
         self.ready = False
+        self.YOLO_ready = False
+        self.GESTURE_ready = False
 
         global AUDIO_HANDLER
         AUDIO_HANDLER = AudioManager()
 
-        model_startup = threading.Thread(target=self.initialize_models, daemon=True)
-        model_startup.start()
+        threading.Thread(target=self.initialize_YOLO_model, daemon=True).start()
+        threading.Thread(target=self.initialize_gesture_model, daemon=True).start()
+
+        while not (self.YOLO_ready and self.GESTURE_ready):
+            time.sleep(0.1)
+
+        self.ready = True
 
         return
     
-    def initialize_models(self):
-        global YOLO_MODEL, GESTURE_MODEL
-
+    def initialize_YOLO_model(self):
+        global YOLO_MODEL
         YOLO_MODEL = YOLO_Model(model_name='yolov8n', format='onnx')
+        self.YOLO_ready = True
+        return
+    
+    def initialize_gesture_model(self):
+        global GESTURE_MODEL
         GESTURE_MODEL = Gesture_Model()
-
-        self.ready = True
+        self.GESTURE_ready = True
         return
     
     def get_app_state(self):
@@ -144,7 +154,7 @@ class YOLO_Model:
         self.warmup()
 
         self.last_OD_time = 0
-        self.GESTURE_RESTART = 6.0  # seconds
+        self.GESTURE_RESTART = 5.0  # seconds
         self.COOLDOWN_PERIOD = 2.0  # seconds
 
         return
