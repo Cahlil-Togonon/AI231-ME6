@@ -13,12 +13,15 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_FILE = os.path.join(BASE_DIR, "index.html")
 
-with open('./classes.json', 'r') as f:
-    CLASS_ITEMS = json.load(f)
-
 class MainApplication:
-    def __init__(self, class_items):
-        self.class_items = class_items
+    def __init__(self):
+        try:
+            import json
+            with open('./classes.json', 'r') as f:
+                self.class_items = json.load(f)
+        except Exception as e:
+            raise RuntimeError(f"Error loading class items: {e}")
+
         self.pos_items = {}
         self.last_count = 0
         self.total_qty = 0
@@ -299,7 +302,7 @@ class Camera:
     def __del__(self):
         self.cap.release()
 
-MAIN_APP = MainApplication(CLASS_ITEMS)
+MAIN_APP = MainApplication()
 
 ### Basic Camera Stream
 def generate_frames():
@@ -341,7 +344,7 @@ def generate_inference_frames():
         print("❌ Could not open camera")
         return
     
-    AUDIO_HANDLER.speak("Welcome! Please Wait.")
+    AUDIO_HANDLER.speak("Welcome!")
 
     while not MAIN_APP.ready:
         time.sleep(0.1)
@@ -368,27 +371,28 @@ def generate_inference_frames():
             status_text = ""
             color = (0,0,0)
 
-            if app_state == 'pre-transaction':
-                frame, current_gesture = GESTURE_MODEL.inference(frame, MAIN_APP, AUDIO_HANDLER)
-                status_text = f"Hand Gesture: {current_gesture}"
-                color = (0, 165, 255) # orange color
+            match app_state:
+                case 'pre-transaction':
+                    frame, current_gesture = GESTURE_MODEL.inference(frame, MAIN_APP, AUDIO_HANDLER)
+                    status_text = f"Hand Gesture: {current_gesture}"
+                    color = (0, 165, 255) # orange color
 
-            elif app_state == 'in-transaction':
-                frame, model_inference_time = YOLO_MODEL.inference(frame, time_now, MAIN_APP, AUDIO_HANDLER)
-                status_text = "YOLO Model: ACTIVE"
-                color = (0, 255, 0) # green color
+                case 'in-transaction':
+                    frame, model_inference_time = YOLO_MODEL.inference(frame, time_now, MAIN_APP, AUDIO_HANDLER)
+                    status_text = "YOLO Model: ACTIVE"
+                    color = (0, 255, 0) # green color  
 
-            elif app_state == 'post-transaction':
-                frame, current_gesture = GESTURE_MODEL.inference(frame, MAIN_APP, AUDIO_HANDLER)
-                status_text = f"Hand Gesture: {current_gesture}"
-                color = (0, 165, 255) # orange color
+                case 'post-transaction':    
+                    frame, current_gesture = GESTURE_MODEL.inference(frame, MAIN_APP, AUDIO_HANDLER)
+                    status_text = f"Hand Gesture: {current_gesture}"
+                    color = (0, 165, 255) # orange color
 
-            elif MAIN_APP.get_app_state() == 'checkout':
-                status_text = "Checkout, please proceed to payment."
-                color = (255, 0, 0) # blue color    
+                case 'checkout':
+                    status_text = "Checkout, please proceed to payment."
+                    color = (255, 0, 0) # blue color  
 
-            else:
-                raise ValueError("Invalid app state")
+                case _:
+                    raise ValueError("Invalid app state")       
 
             # Draw header text
             cv2.putText(frame,
