@@ -266,6 +266,7 @@ class Gesture_Model:
                 elif self.check_gesture_hold(current_gesture, "Closed Fist", "closed_fist_start_time"):
                     MAIN_APP.set_app_state('checkout')
                     AUDIO_HANDLER.speak("Checkout initiated.")
+                    AUDIO_HANDLER.speak(f"Your total is {MAIN_APP.grand_total:.2f} Pesos.")
             
             else:
                 raise ValueError("Invalid app state for gesture inference")
