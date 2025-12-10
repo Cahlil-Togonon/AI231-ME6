@@ -428,8 +428,8 @@ def generate_inference_frames():
             # Draw Model FPS
             cv2.putText(
                 frame,
-                f"Model FPS: {model_fps:.1f}",
-                (frame.shape[1] - 250, frame.shape[0] - 30),
+                f"Model FPS: {model_fps:.1f} ({model_inference_time*1000:.2f}ms)",
+                (frame.shape[1] - 260, frame.shape[0] - 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.4,
                 (0, 255, 0),
@@ -441,7 +441,7 @@ def generate_inference_frames():
             cv2.putText(
                 frame,
                 f"Camera FPS: {current_fps:.1f}",
-                (frame.shape[1] - 250, frame.shape[0] - 10),
+                (frame.shape[1] - 260, frame.shape[0] - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.4,
                 (0, 255, 0),
