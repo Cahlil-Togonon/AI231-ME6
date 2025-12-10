@@ -120,9 +120,11 @@ class AudioManager:
                 engine.setProperty('volume', 1.0)
                 voices = engine.getProperty('voices')
                 engine.setProperty('voice', voices[1].id)
+                engine.setProperty('pitch', 70)
                 engine.say(text)
                 engine.runAndWait()
-                del engine
+                engine.stop()
+                # del engine
 
             except Exception as e:
                 print("❌ TTS error:", e)
@@ -212,7 +214,7 @@ class Gesture_Model:
         self.current_gesture = "None"
         self.closed_fist_start_time = None
         self.open_hand_start_time = None
-        self.GESTURE_HOLD_DURATION = 1.5  # seconds
+        self.GESTURE_HOLD_DURATION = 2.0  # seconds
         return
 
     def check_gesture_hold(self, gesture: str, target_gesture: str, start_time_attr: str) -> bool:
@@ -264,6 +266,7 @@ class Gesture_Model:
                 elif self.check_gesture_hold(current_gesture, "Closed Fist", "closed_fist_start_time"):
                     MAIN_APP.set_app_state('checkout')
                     AUDIO_HANDLER.speak("Checkout initiated.")
+                    AUDIO_HANDLER.speak(f"Your total is {MAIN_APP.grand_total:.2f} Pesos.")
             
             else:
                 raise ValueError("Invalid app state for gesture inference")
