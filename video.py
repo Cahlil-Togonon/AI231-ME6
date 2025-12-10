@@ -30,6 +30,12 @@ class MainApplication:
         self.YOLO_ready = False
         self.GESTURE_ready = False
 
+        self.model_name = 'yolov8n'     # 'yolov8n', 'yolo11n'
+        self.dataset_ver = 'v3'         # 'v2', 'v3', 'v4'
+        self.epochs = '150'
+        self.format = 'onnx'            # 'pytorch', 'onnx', 'tensorrt', 'torchscript'
+        self.jetson = ''                # '', '-jetson'
+
         global AUDIO_HANDLER
         AUDIO_HANDLER = AudioManager()
 
@@ -45,7 +51,7 @@ class MainApplication:
     
     def initialize_YOLO_model(self):
         global YOLO_MODEL
-        YOLO_MODEL = YOLO_Model(model_name='yolov8n', format='onnx')
+        YOLO_MODEL = YOLO_Model(model_name=self.model_name, dataset_ver=self.dataset_ver, epochs=self.epochs, format=self.format, jetson=self.jetson)
         self.YOLO_ready = True
         return
     
@@ -120,11 +126,11 @@ class AudioManager:
                 engine.setProperty('volume', 1.0)
                 voices = engine.getProperty('voices')
                 engine.setProperty('voice', voices[1].id)
-                engine.setProperty('pitch', 70)
+                # engine.setProperty('pitch', 70)
                 engine.say(text)
                 engine.runAndWait()
-                engine.stop()
-                # del engine
+                # engine.stop()
+                del engine
 
             except Exception as e:
                 print("❌ TTS error:", e)
@@ -136,7 +142,7 @@ class AudioManager:
         self.speech_queue.put(str(text))
 
 class YOLO_Model:
-    def __init__(self, model_name: str = 'yolov8n', format: str = 'onnx'):
+    def __init__(self, model_name: str = 'yolov8n', dataset_ver: str = "", epochs: str = "", format: str = 'onnx', jetson: str = ''):
         try:
             from ultralytics import YOLO
             import torch.cuda
@@ -152,7 +158,7 @@ class YOLO_Model:
 
         self.device = 0 if torch.cuda.is_available() else 'cpu'
 
-        self.model = YOLO(f"./models/best.{format_extension[format]}")
+        self.model = YOLO(f"./models/best-{model_name}-dataset-{dataset_ver}-{epochs}epochs{jetson}.{format_extension[format]}")
         print(f"Loaded {model_name} model in {format} format")
 
         self.warmup()
