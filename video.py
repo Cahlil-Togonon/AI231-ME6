@@ -31,10 +31,10 @@ class MainApplication:
         self.GESTURE_ready = False
 
         self.model_name = 'yolov8n'     # 'yolov8n', 'yolo11n'
-        self.dataset_ver = 'v3'         # 'v2', 'v3', 'v4'
+        self.dataset_ver = 'v4'         # 'v2', 'v3', 'v4'
         self.epochs = '150'
-        self.format = 'onnx'            # 'pytorch', 'onnx', 'tensorrt', 'torchscript'
-        self.jetson = ''                # '', '-jetson'
+        self.format = 'tensorrt'            # 'pytorch', 'onnx', 'tensorrt', 'torchscript'
+        self.jetson = '-jetson'                # '', '-jetson'
 
         global AUDIO_HANDLER
         AUDIO_HANDLER = AudioManager()
@@ -42,13 +42,8 @@ class MainApplication:
         threading.Thread(target=self.initialize_YOLO_model, daemon=True).start()
         threading.Thread(target=self.initialize_gesture_model, daemon=True).start()
 
-        while not (self.YOLO_ready and self.GESTURE_ready):
-            time.sleep(0.1)
-
-        self.ready = True
-
         return
-    
+
     def initialize_YOLO_model(self):
         global YOLO_MODEL
         YOLO_MODEL = YOLO_Model(model_name=self.model_name, dataset_ver=self.dataset_ver, epochs=self.epochs, format=self.format, jetson=self.jetson)
@@ -124,13 +119,13 @@ class AudioManager:
                 engine = pyttsx3.init()
                 engine.setProperty('rate', 175)
                 engine.setProperty('volume', 1.0)
-                voices = engine.getProperty('voices')
-                engine.setProperty('voice', voices[1].id)
+                # voices = engine.getProperty('voices')
+                # engine.setProperty('voice', voices[1].id)
                 # engine.setProperty('pitch', 70)
                 engine.say(text)
                 engine.runAndWait()
-                # engine.stop()
-                del engine
+                engine.stop()
+                # del engine
 
             except Exception as e:
                 print("❌ TTS error:", e)
@@ -356,10 +351,10 @@ def generate_inference_frames():
     
     AUDIO_HANDLER.speak("Welcome!")
 
-    while not MAIN_APP.ready:
-        time.sleep(0.1)
+    # while not MAIN_APP.ready:
+    #     time.sleep(0.1)
 
-    AUDIO_HANDLER.speak("System Ready.")
+    # AUDIO_HANDLER.speak("System Ready.")
 
     fps_time = time.time()
     fps_counter = 0
@@ -367,6 +362,7 @@ def generate_inference_frames():
     model_inference_time = 0
     model_fps = 0
     current_gesture = "None"
+    first_time = True
 
     try:
         while True:
@@ -376,33 +372,38 @@ def generate_inference_frames():
 
             time_now = time.time()
 
-            app_state = MAIN_APP.get_app_state()
+            status_text = "Models are Loading..."
+            color = (0,0,255) # red color
 
-            status_text = ""
-            color = (0,0,0)
+            if MAIN_APP.YOLO_ready and MAIN_APP.GESTURE_ready:
+                if first_time:
+                    AUDIO_HANDLER.speak("System Ready.")
+                    first_time = False
 
-            match app_state:
-                case 'pre-transaction':
-                    frame, current_gesture = GESTURE_MODEL.inference(frame, MAIN_APP, AUDIO_HANDLER)
-                    status_text = f"Hand Gesture: {current_gesture}"
-                    color = (0, 165, 255) # orange color
+                app_state = MAIN_APP.get_app_state()
 
-                case 'in-transaction':
-                    frame, model_inference_time = YOLO_MODEL.inference(frame, time_now, MAIN_APP, AUDIO_HANDLER)
-                    status_text = "YOLO Model: ACTIVE"
-                    color = (0, 255, 0) # green color  
+                match app_state:
+                    case 'pre-transaction':
+                        frame, current_gesture = GESTURE_MODEL.inference(frame, MAIN_APP, AUDIO_HANDLER)
+                        status_text = f"Hand Gesture: {current_gesture}"
+                        color = (0, 165, 255) # orange color
 
-                case 'post-transaction':    
-                    frame, current_gesture = GESTURE_MODEL.inference(frame, MAIN_APP, AUDIO_HANDLER)
-                    status_text = f"Hand Gesture: {current_gesture}"
-                    color = (0, 165, 255) # orange color
+                    case 'in-transaction':
+                        frame, model_inference_time = YOLO_MODEL.inference(frame, time_now, MAIN_APP, AUDIO_HANDLER)
+                        status_text = "YOLO Model: ACTIVE"
+                        color = (0, 255, 0) # green color  
 
-                case 'checkout':
-                    status_text = "Checkout, please proceed to payment."
-                    color = (255, 0, 0) # blue color  
+                    case 'post-transaction':    
+                        frame, current_gesture = GESTURE_MODEL.inference(frame, MAIN_APP, AUDIO_HANDLER)
+                        status_text = f"Hand Gesture: {current_gesture}"
+                        color = (0, 165, 255) # orange color
 
-                case _:
-                    raise ValueError("Invalid app state")       
+                    case 'checkout':
+                        status_text = "Checkout, please proceed to payment."
+                        color = (255, 0, 0) # blue color  
+
+                    case _:
+                        raise ValueError("Invalid app state")       
 
             # Draw header text
             cv2.putText(frame,
