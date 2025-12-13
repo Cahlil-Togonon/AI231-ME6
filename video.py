@@ -24,11 +24,11 @@ class MainApplication:
         self.YOLO_ready = False
         self.GESTURE_ready = False
 
-        self.model_name = 'yolov8n'     # 'yolov8n', 'yolo11n'
+        self.model_name = 'yolo11n'     # 'yolov8n', 'yolo11n'
         self.dataset_ver = 'v4'         # 'v2', 'v3', 'v4'
         self.epochs = '150'
-        self.format = 'onnx'            # 'pytorch', 'onnx', 'tensorrt', 'torchscript'
-        self.jetson = ''                # '', '-jetson'
+        self.format = 'tensorrt'            # 'pytorch', 'onnx', 'tensorrt', 'torchscript'
+        self.jetson = '-jetson'                # '', '-jetson'
 
         try:
             import json
@@ -180,30 +180,37 @@ class YOLO_Model:
         results = self.model(frame, device=self.device, verbose=False)
         model_inference_time = time.time() - time_now
 
-        # annotated = results[0].plot()
-        # frame = annotated
 
-        def get_color(idx):
-            random.seed(idx)
-            return tuple(int(x) for x in random.choices(range(64, 256), k=3))
+        if MAIN_APP.format in ['pytorch', 'onnx']:
+            annotated = results[0].plot()
+            frame = annotated
 
-        for box in results[0].boxes:
-            cls = int(box.cls[0])
-            conf = float(box.conf[0])
-            xyxy = box.xyxy[0].cpu().numpy().astype(int)
-            class_name = MAIN_APP.class_items.get(str(cls), {}).get("name", f"class id: {cls}")
-            label = f"{class_name} {conf:.2f}"
-            color = get_color(cls)
+        elif MAIN_APP.format in ['tensorrt']:
+            def get_color(idx):
+                random.seed(idx)
+                return tuple(int(x) for x in random.choices(range(64, 256), k=3))
 
-            # Draw bounding box
-            cv2.rectangle(frame, (xyxy[0], xyxy[1]), (xyxy[2], xyxy[3]), color, 2)
+            for box in results[0].boxes:
+                cls = int(box.cls[0])
+                conf = float(box.conf[0])
+                
+                if conf < 0.7:
+                    continue
 
-            # Draw filled rectangle for label background
-            (label_width, label_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
-            cv2.rectangle(frame, (xyxy[0], xyxy[1] - label_height - baseline), (xyxy[0] + label_width, xyxy[1]), color, -1)
+                xyxy = box.xyxy[0].cpu().numpy().astype(int)
+                class_name = MAIN_APP.class_items.get(str(cls), {}).get("name", f"class id: {cls}")
+                label = f"{class_name} {conf:.2f}"
+                color = get_color(cls)
 
-            # Draw label text (white)
-            cv2.putText(frame, label, (xyxy[0], xyxy[1] - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
+                # Draw bounding box
+                cv2.rectangle(frame, (xyxy[0], xyxy[1]), (xyxy[2], xyxy[3]), color, 2)
+
+                # Draw filled rectangle for label background
+                (label_width, label_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                cv2.rectangle(frame, (xyxy[0], xyxy[1] - label_height - baseline), (xyxy[0] + label_width, xyxy[1]), color, -1)
+
+                # Draw label text (white)
+                cv2.putText(frame, label, (xyxy[0], xyxy[1] - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
 
         if MAIN_APP.pos_items and time_now - self.last_OD_time >= self.GESTURE_RESTART:
             MAIN_APP.set_app_state('post-transaction')
