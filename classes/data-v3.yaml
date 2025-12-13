@@ -1,0 +1,46 @@
+train: ../train/images
+val: ../test/images
+
+nc: 34
+names:
+- coffee_nescafe
+- coffee_kopiko
+- Lucky-Me-Pancit-Canton
+- Coke-in-can
+- Alaska-Milk
+- Century-Tuna
+- VCut-Spicy-Barbeque
+- Selecta-Cornetto
+- Nestle-Yogurt
+- Femme-Bathroom-Tissue
+- Maya-Champorado
+- JnJ-Potato-Chips
+- Nivea-Deodorant
+- UFC-Canned-Mushroom
+- Libbys-Vienna-Sausage-can
+- Stik-O
+- NissinCupNoodles
+- Dewberry-Strawberry
+- Smart-C
+- Pineapple-juice-can
+- Nestle-Chuckie
+- Delight-Probiotic-Drink
+- Summit-Drinking-Water
+- almond_milk
+- Piknik
+- Bactidol
+- HS-Shampoo
+- irish-spring-soap
+- c2_na_green
+- colgate_toothpaste
+- 555-sardines
+- meadows-truffle
+- double-black
+- NongshimCupNoodles
+
+roboflow:
+  workspace: trialme4
+  project: trial_me4-h1gym
+  version: 5
+  license: Private
+  url: https://app.roboflow.com/trialme4/trial_me4-h1gym/5
